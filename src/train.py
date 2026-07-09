@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """滚动训练脚本
 
-数据切分(严格时序,不随机打乱;滚动重训满足"滚动训练/滚动验证"要求):
+数据切分(严格时序,不随机打乱;滚动步长参数化,--roll-months,默认 6 个月):
   fold 1: 训练 2019-04-01 ~ 2021-12-31 | 验证 2022 全年       | 预测 2023-01 ~ 2023-06
   fold 2: 训练 2019-04-01 ~ 2022-06-30 | 验证 2022-07 ~ 2022-12 | 预测 2023-07 ~ 2023-12
+(--roll-months 3 为季度滚动四折,12 退化为题目基础切分;验证集始终限定在 2022 年内)
 训练集尾部设 6 个交易日 embargo(标签窗口跨入验证期的样本剔除),验证集尾部同理。
 
 训练细节:
@@ -31,14 +32,41 @@ from utils import set_seed, ic_summary
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "results")
 EMBARGO = LABEL_HORIZON + 1  # 标签用到 T+6,故留 6 个交易日隔离带
 
-FOLDS = [
-    {"train": ("2019-04-01", "2021-12-31"),
-     "val": ("2022-01-01", "2022-12-31"),
-     "test": ("2023-01-01", "2023-06-30")},
-    {"train": ("2019-04-01", "2022-06-30"),
-     "val": ("2022-07-01", "2022-12-31"),
-     "test": ("2023-07-01", "2023-12-29")},
-]
+# 基础切分(题目给定):训练 2019-2021 | 验证 2022 | 测试 2023
+TRAIN_START = "2019-04-01"          # 前 60 个交易日为特征窗口预热,不作样本
+BASE_TRAIN_END = pd.Timestamp("2021-12-31")
+VAL_START0 = pd.Timestamp("2022-01-01")
+VAL_END = pd.Timestamp("2022-12-31")
+TEST_START0 = pd.Timestamp("2023-01-01")
+TEST_END = pd.Timestamp("2023-12-29")
+
+
+def make_folds(roll_months: int = 6) -> list:
+    """按滚动步长(月)生成训练折:每 roll_months 个月扩张一次训练窗口、
+    验证起点相应后移、预测下一段测试区间。
+
+    验证集始终限定在 2022 年内(2023 仅作最终测试,不参与任何调参/早停);
+    roll_months=6 为默认两折,12 退化为题目给定的基础切分,3 为季度滚动。
+    """
+    folds = []
+    for i in range(int(np.ceil(12 / roll_months))):
+        off = pd.DateOffset(months=i * roll_months)
+        val_start = VAL_START0 + off
+        test_start = TEST_START0 + off
+        test_end = min(TEST_START0 + pd.DateOffset(months=(i + 1) * roll_months)
+                       - pd.Timedelta(days=1), TEST_END)
+        if val_start > VAL_END or test_start > TEST_END:
+            break
+        fmt = "%Y-%m-%d"
+        folds.append({
+            "train": (TRAIN_START, (BASE_TRAIN_END + off).strftime(fmt)),
+            "val": (val_start.strftime(fmt), VAL_END.strftime(fmt)),
+            "test": (test_start.strftime(fmt), test_end.strftime(fmt)),
+        })
+    return folds
+
+
+FOLDS = make_folds(6)
 
 
 # ---------------------------------------------------------------- 采样与批量
@@ -154,13 +182,15 @@ def train_fold(model_name, panel, fold, seed=42, max_epochs=30, patience=5,
     return model, test_days, pred_test, best_ic, val_days_eval, pred_val_best
 
 
-def run(model_name: str, seed: int = 42, device: str = "cpu"):
+def run(model_name: str, seed: int = 42, device: str = "cpu", folds: list = None):
     panel = load_feature_panel()
     days, stocks, y_raw = panel["days"], panel["stocks"], panel["y_raw"]
+    if folds is None:
+        folds = FOLDS
 
     rows, rows_val, ics_all = [], [], []
-    print(f"===== model: {model_name} (device={device}) =====")
-    for f_i, fold in enumerate(FOLDS, 1):
+    print(f"===== model: {model_name} (device={device}, folds={len(folds)}) =====")
+    for f_i, fold in enumerate(folds, 1):
         print(f"fold {f_i}: train {fold['train']}  val {fold['val']}  test {fold['test']}")
         _, test_days, pred, best_val_ic, val_days, pred_val = train_fold(
             model_name, panel, fold, seed=seed, device=device)
@@ -201,16 +231,19 @@ if __name__ == "__main__":
     ap.add_argument("--model", default="gru", choices=["gru", "lstm", "mlp", "all"])
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    ap.add_argument("--roll-months", type=int, default=6,
+                    help="滚动更新步长(月),6=半年两折(默认),3=季度,12=不滚动")
     args = ap.parse_args()
 
     device = args.device
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    folds = make_folds(args.roll_months)
     torch.set_num_threads(os.cpu_count())
     names = ["gru", "lstm", "mlp"] if args.model == "all" else [args.model]
     for n in names:
-        run(n, seed=args.seed, device=device)
+        run(n, seed=args.seed, device=device, folds=folds)
 
     # 汇总磁盘上已有的全部模型结果(支持分多次/多机器训练)
     summary = {}

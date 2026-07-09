@@ -40,6 +40,7 @@ python notebooks/eda.py
 
 # 2. 训练(gru / lstm / mlp / all;首次运行会构建特征缓存,约 2-3 分钟)
 python src/train.py --model gru
+python src/train.py --model gru --roll-months 3   # 季度滚动(默认 6=半年,12=不滚动)
 
 # 3. 回测(默认读 results/predictions.csv)
 python src/backtest.py
