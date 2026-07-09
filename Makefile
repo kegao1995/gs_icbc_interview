@@ -38,7 +38,7 @@ neutral:
 	$(PYTHON) src/backtest.py --neutral --tag neutral
 
 final:
-	$(PYTHON) src/backtest.py --buffer 350 --neutral --tag buffer_neutral
+	$(PYTHON) src/backtest.py --buffer 350 --neutral --smooth 40 --tag smooth40
 
 plots:
 	$(PYTHON) src/plots.py

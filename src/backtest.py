@@ -89,17 +89,24 @@ def select_target(pred: pd.Series, holdings: dict, tradable_t: pd.Series,
 
 
 def simulate(pred_df: pd.DataFrame, mkt: dict, n_top: int = N_TOP,
-             cost_per_side: float = COST_PER_SIDE, buffer: int = 0, skip: int = 0):
+             cost_per_side: float = COST_PER_SIDE, buffer: int = 0, skip: int = 0,
+             rebal_weeks: int = 1, smooth: int = 1):
     """周度调仓组合模拟。
 
     pred_df: [TradingDay, StockID, pred];返回 (日度收益 Series, 每次调仓单边换手 Series)
     """
     days = mkt["days"]
     pred_wide = pred_df.pivot(index="TradingDay", columns="StockID", values="pred")
+    if smooth > 1:
+        # 信号平滑:用过去 smooth 个交易日预测值的滚动均值排序(仅用当日及以前的预测)。
+        # 排名变化放缓 -> 周度调仓下实际换手接近低频调仓,但突发信号仍一周内响应。
+        pred_wide = pred_wide.rolling(smooth, min_periods=1).mean()
 
     test_days = pred_wide.index.sort_values()
     week_last = get_week_last_days_from(days)
     signal_days = [d for d in week_last if d in test_days]
+    if rebal_weeks > 1:            # 降频:每 rebal_weeks 周调一次仓
+        signal_days = signal_days[::rebal_weeks]
     # 最后一个信号日若无 T+1 则丢弃
     signal_days = [d for d in signal_days if days.get_loc(d) + 1 < len(days)]
     signal_set = set(signal_days)
@@ -228,7 +235,8 @@ def plot_equity(port_ret, bench_ret, out_png):
 # ---------------------------------------------------------------- 主流程
 
 def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
-                 skip: int = 0, tag: str = "", save: bool = True):
+                 skip: int = 0, rebal_weeks: int = 1, smooth: int = 1,
+                 tag: str = "", save: bool = True):
     quote = load_quote()
     mkt = prepare_market(quote)
 
@@ -236,7 +244,8 @@ def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
     if neutral:
         pred_df = neutralize_by_industry(pred_df, quote)
 
-    port_ret, turnovers = simulate(pred_df, mkt, buffer=buffer, skip=skip)
+    port_ret, turnovers = simulate(pred_df, mkt, buffer=buffer, skip=skip,
+                                   rebal_weeks=rebal_weeks, smooth=smooth)
 
     # 基准:同引擎、全持仓、零成本
     bench_pred = pred_df.copy()
@@ -281,6 +290,10 @@ if __name__ == "__main__":
     ap.add_argument("--buffer", type=int, default=0)
     ap.add_argument("--neutral", action="store_true")
     ap.add_argument("--skip", type=int, default=0)
+    ap.add_argument("--rebal-weeks", type=int, default=1,
+                    help="调仓间隔(周),1=周度(默认),2=双周,4=月度")
+    ap.add_argument("--smooth", type=int, default=1,
+                    help="信号平滑窗口(交易日),1=不平滑(默认)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--self-check", action="store_true")
     args = ap.parse_args()
@@ -288,4 +301,5 @@ if __name__ == "__main__":
         self_check()
     else:
         run_backtest(args.pred, buffer=args.buffer, neutral=args.neutral,
-                     skip=args.skip, tag=args.tag)
+                     skip=args.skip, rebal_weeks=args.rebal_weeks,
+                     smooth=args.smooth, tag=args.tag)
