@@ -27,3 +27,6 @@ results/predictions_val_*.csv
 # Office 临时锁文件
 ~$*
 **/~$*
+
+# 考题原始材料(本地保留,不入仓库;数据已移至根目录 Quote.parquet)
+量化候选人笔试项目文件/

@@ -10,7 +10,7 @@
 ├── README.md                # 本文件
 ├── requirements.txt         # 依赖包及版本
 ├── report.md                # 研究报告
-├── 量化候选人笔试项目文件/    # 原始数据(Quote.parquet)
+├── Quote.parquet            # 原始数据(随仓库提交,clone 后可直接运行)
 ├── src/
 │   ├── data_loader.py       # 数据加载、复权因子、可交易标志
 │   ├── features.py          # 特征工程与标签构造(39 个特征,含复权因子反推的分红/送转因子)

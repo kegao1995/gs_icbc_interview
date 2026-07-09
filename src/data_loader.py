@@ -11,7 +11,7 @@ import os
 import numpy as np
 import pandas as pd
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "量化候选人笔试项目文件", "Quote.parquet")
+DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "Quote.parquet")
 
 
 def load_quote(path: str = DATA_PATH) -> pd.DataFrame:
