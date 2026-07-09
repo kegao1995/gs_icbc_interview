@@ -27,6 +27,9 @@ GROUPS = {
                "ma5_ma20", "high60", "low60"],
     "量额/流动性": ["log_amt", "amt_ratio20", "turn_ratio5_20", "vol_cv20",
                  "corr_pv20", "amihud20", "susp_frac20"],
+    "资金流": ["mfi14", "cmf20", "net_flow5", "net_flow20"],
+    "技术指标": ["rsi14", "macd_hist", "boll_z20", "stoch14"],
+    "分红/送转": ["div_yield_244", "split_int_244"],
 }
 
 

@@ -122,6 +122,57 @@ def build_feature_panel(df: pd.DataFrame = None):
                                  .rolling(20, min_periods=10).mean() * 1e6)
     feats["susp_frac20"] = (~tradable).rolling(20, min_periods=20).mean()
 
+    # --- 分红/送转(由复权因子还原,非外部数据) ---
+    # 现金分红除息日 PrevClose = 前日Close - D,故单次股息率 = (f-1)/f;
+    # A 股单次股息率极少超 8%,而送转/配股因子 >= 1.10,按 f-1 阈值 8% 切分两类事件。
+    # 244 日滚动累加得到年化口径;首年历史不足按已有事件累计(截面标准化后可比)。
+    adj_f = _pivot(df, "adj")
+    f_single = (adj_f / adj_f.shift(1)).fillna(1.0)
+    div_evt = ((f_single - 1) / f_single).where(
+        (f_single > 1) & (f_single - 1 < 0.08), 0.0)
+    split_evt = (f_single - 1).where(f_single - 1 >= 0.08, 0.0)
+    feats["div_yield_244"] = div_evt.rolling(244, min_periods=60).sum()
+    feats["split_int_244"] = split_evt.rolling(244, min_periods=60).sum()
+    # 红利增长率(实验后弃用,代码留档):近 244 日复权口径分红总额 / 前一个 244 日 - 1。
+    # 弃用理由:三模型中两个验证集 RankIC 走低、信号不稳;因子需 488 日历史,
+    # 2019-20 训练样本上恒为零,特征在训练期中途"开机"引入分布漂移;
+    # 分红事件年频过低,对周频策略信息密度不足。详见报告特征集对比一节。
+    # d_adj = close.shift(1) * div_evt
+    # div_amt_244 = d_adj.rolling(244, min_periods=60).sum()
+    # prev_amt = div_amt_244.shift(244)
+    # feats["div_growth"] = div_amt_244 / prev_amt.where(prev_amt > 0) - 1
+
+    # --- 资金流(OHLCV 代理,无逐笔数据) ---
+    # MFI:以典型价涨跌方向划分资金流入/流出,14 日流入占比
+    tp = (high + low + close.where(tradable)) / 3
+    tp_up = tp.diff() > 0
+    pos_mf = amt_nan.where(tp_up, 0.0).rolling(14, min_periods=10).sum()
+    all_mf = amt_nan.rolling(14, min_periods=10).sum()
+    feats["mfi14"] = pos_mf / all_mf
+    # Chaikin Money Flow:收盘在日内区间的位置加权成交量,20 日
+    mfm = ((close.where(tradable) - low) - (high - close.where(tradable))) / rng
+    feats["cmf20"] = ((mfm * vol_nan).rolling(20, min_periods=10).sum()
+                      / vol_nan.rolling(20, min_periods=10).sum())
+    # 主动净流入占比:按当日涨跌方向签名的成交额占比,5/20 日
+    signed_amt = amt_nan * np.sign(ret1)
+    for k in (5, 20):
+        feats[f"net_flow{k}"] = (signed_amt.rolling(k, min_periods=k).sum()
+                                 / amt_nan.rolling(k, min_periods=k).sum())
+
+    # --- 经典技术指标 ---
+    up = ret1.clip(lower=0).rolling(14, min_periods=14).mean()
+    dn = (-ret1).clip(lower=0).rolling(14, min_periods=14).mean()
+    feats["rsi14"] = up / (up + dn)
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd = (ema12 - ema26) / close
+    feats["macd_hist"] = macd - macd.ewm(span=9, adjust=False).mean()
+    feats["boll_z20"] = ((close - close.rolling(20, min_periods=20).mean())
+                         / close.rolling(20, min_periods=20).std())
+    c_lo14 = close.rolling(14, min_periods=14).min()
+    c_hi14 = close.rolling(14, min_periods=14).max()
+    feats["stoch14"] = (close - c_lo14) / (c_hi14 - c_lo14).replace(0, np.nan)
+
     # --- 行业相对强弱 ---
     ind = df.groupby("StockID")["IndustryName"].first().reindex(close.columns)
     for k in (5, 20):

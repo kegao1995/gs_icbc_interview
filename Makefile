@@ -30,12 +30,15 @@ backtest:
 self-check:
 	$(PYTHON) src/backtest.py --self-check
 
-# 加分项:换手缓冲 / 行业中性化
+# 加分项:换手缓冲 / 行业中性化 / 最终版(缓冲+中性)
 buffer:
 	$(PYTHON) src/backtest.py --buffer 350 --tag buffer
 
 neutral:
 	$(PYTHON) src/backtest.py --neutral --tag neutral
+
+final:
+	$(PYTHON) src/backtest.py --buffer 350 --neutral --tag buffer_neutral
 
 plots:
 	$(PYTHON) src/plots.py
@@ -46,7 +49,9 @@ ablation:
 # 打包提交(排除原始数据、缓存、交接文件;Windows 10+ 自带 bsdtar 支持 zip)
 package:
 	tar -a -cf submission.zip README.md requirements.txt report.md Makefile \
-		src notebooks results --exclude "results/cache" --exclude "__pycache__"
+		src notebooks results --exclude "results/cache" --exclude "__pycache__" \
+		--exclude "results/v1_29feat" --exclude "results/v2_37feat" \
+		--exclude "results/v3_39feat" --exclude "results/predictions_val_*"
 
 # 清理缓存与编译产物(不动 results 下的交付物)
 clean:

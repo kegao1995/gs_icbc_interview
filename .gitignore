@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.claude/
 
 # IDE
 .idea/
@@ -12,3 +13,17 @@ venv/
 # 特征缓存(体积大,可由 features.py 重新生成)
 results/cache/
 
+
+# 数据查看用 CSV(勿提交)
+量化候选人笔试项目文件/Quote_annotated.csv
+量化候选人笔试项目文件/Quote_sample5000.csv
+
+# 研究过程备份与可再生成的中间产物(不提交)
+results/v1_29feat/
+results/v2_37feat/
+results/v3_39feat/
+results/predictions_val_*.csv
+
+# Office 临时锁文件
+~$*
+**/~$*

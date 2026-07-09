@@ -149,21 +149,27 @@ def train_fold(model_name, panel, fold, seed=42, max_epochs=30, patience=5,
     model.load_state_dict(best_state)
 
     pred_test = predict_days(model, panel, test_days, device)
-    return model, test_days, pred_test, best_ic
+    # 最优权重下的验证期预测(用于组合构建规则在验证集上调参)
+    pred_val_best = predict_days(model, panel, val_days_eval, device)
+    return model, test_days, pred_test, best_ic, val_days_eval, pred_val_best
 
 
-def run(model_name: str, seed: int = 42):
+def run(model_name: str, seed: int = 42, device: str = "cpu"):
     panel = load_feature_panel()
     days, stocks, y_raw = panel["days"], panel["stocks"], panel["y_raw"]
 
-    rows, ics_all = [], []
-    print(f"===== model: {model_name} =====")
+    rows, rows_val, ics_all = [], [], []
+    print(f"===== model: {model_name} (device={device}) =====")
     for f_i, fold in enumerate(FOLDS, 1):
         print(f"fold {f_i}: train {fold['train']}  val {fold['val']}  test {fold['test']}")
-        _, test_days, pred, best_val_ic = train_fold(model_name, panel, fold, seed=seed)
+        _, test_days, pred, best_val_ic, val_days, pred_val = train_fold(
+            model_name, panel, fold, seed=seed, device=device)
         for k, t in enumerate(test_days):
             rows.append(pd.DataFrame({
                 "TradingDay": days[t], "StockID": stocks, "pred": pred[k]}))
+        for k, t in enumerate(val_days):
+            rows_val.append(pd.DataFrame({
+                "TradingDay": days[t], "StockID": stocks, "pred": pred_val[k]}))
         # 测试期日度 IC(标签完整的日子)
         for k, t in enumerate(test_days):
             v = np.isfinite(y_raw[t]) & np.isfinite(pred[k])
@@ -177,6 +183,8 @@ def run(model_name: str, seed: int = 42):
     os.makedirs(RESULTS_DIR, exist_ok=True)
     out_csv = os.path.join(RESULTS_DIR, f"predictions_{model_name}.csv")
     pred_df.to_csv(out_csv, index=False)
+    pd.concat(rows_val, ignore_index=True).to_csv(
+        os.path.join(RESULTS_DIR, f"predictions_val_{model_name}.csv"), index=False)
 
     ic_s = pd.Series(dict(ics_all)).sort_index()
     ic_s.to_csv(os.path.join(RESULTS_DIR, f"daily_rank_ic_{model_name}.csv"),
@@ -192,12 +200,17 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="gru", choices=["gru", "lstm", "mlp", "all"])
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     args = ap.parse_args()
+
+    device = args.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
     torch.set_num_threads(os.cpu_count())
     names = ["gru", "lstm", "mlp"] if args.model == "all" else [args.model]
     for n in names:
-        run(n, seed=args.seed)
+        run(n, seed=args.seed, device=device)
 
     # 汇总磁盘上已有的全部模型结果(支持分多次/多机器训练)
     summary = {}

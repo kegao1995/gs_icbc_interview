@@ -70,9 +70,13 @@ def neutralize_by_industry(pred_df: pd.DataFrame, quote: pd.DataFrame) -> pd.Dat
 # ---------------------------------------------------------------- 组合模拟
 
 def select_target(pred: pd.Series, holdings: dict, tradable_t: pd.Series,
-                  n_top: int = N_TOP, buffer: int = 0) -> list:
-    """信号日选股。buffer>0 时启用缓冲区规则:已持有且预测排名在 buffer 内的不卖出。"""
+                  n_top: int = N_TOP, buffer: int = 0, skip: int = 0) -> list:
+    """信号日选股。buffer>0 时启用缓冲区规则:已持有且预测排名在 buffer 内的不卖出。
+    skip>0 时剔除预测值最高的前 skip 名再选(最高分位股票短期均值回归,见分组收益诊断)。"""
     cand = pred[tradable_t.reindex(pred.index).fillna(False)].dropna()
+    if skip > 0 and len(cand) > n_top + skip:
+        top_names = cand.rank(ascending=False).sort_values().index[:skip]
+        cand = cand.drop(top_names)
     if len(cand) <= n_top:
         return list(cand.index)
     rank = cand.rank(ascending=False)
@@ -85,7 +89,7 @@ def select_target(pred: pd.Series, holdings: dict, tradable_t: pd.Series,
 
 
 def simulate(pred_df: pd.DataFrame, mkt: dict, n_top: int = N_TOP,
-             cost_per_side: float = COST_PER_SIDE, buffer: int = 0):
+             cost_per_side: float = COST_PER_SIDE, buffer: int = 0, skip: int = 0):
     """周度调仓组合模拟。
 
     pred_df: [TradingDay, StockID, pred];返回 (日度收益 Series, 每次调仓单边换手 Series)
@@ -159,7 +163,8 @@ def simulate(pred_df: pd.DataFrame, mkt: dict, n_top: int = N_TOP,
         if d in signal_set:
             tradable_t = mkt["tradable"].loc[d]
             pred_t = pred_wide.loc[d]
-            pending = select_target(pred_t, dict(w), tradable_t, n_top=n_top, buffer=buffer)
+            pending = select_target(pred_t, dict(w), tradable_t, n_top=n_top,
+                                    buffer=buffer, skip=skip)
 
     return pd.Series(daily_ret).sort_index(), pd.Series(turnovers).sort_index()
 
@@ -223,7 +228,7 @@ def plot_equity(port_ret, bench_ret, out_png):
 # ---------------------------------------------------------------- 主流程
 
 def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
-                 tag: str = "", save: bool = True):
+                 skip: int = 0, tag: str = "", save: bool = True):
     quote = load_quote()
     mkt = prepare_market(quote)
 
@@ -231,7 +236,7 @@ def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
     if neutral:
         pred_df = neutralize_by_industry(pred_df, quote)
 
-    port_ret, turnovers = simulate(pred_df, mkt, buffer=buffer)
+    port_ret, turnovers = simulate(pred_df, mkt, buffer=buffer, skip=skip)
 
     # 基准:同引擎、全持仓、零成本
     bench_pred = pred_df.copy()
@@ -241,7 +246,7 @@ def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
 
     metrics = evaluate(port_ret, bench_ret, turnovers)
     print(f"\n===== 回测结果 {tag or os.path.basename(pred_path)} "
-          f"(buffer={buffer}, neutral={neutral}) =====")
+          f"(buffer={buffer}, neutral={neutral}, skip={skip}) =====")
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
 
@@ -275,10 +280,12 @@ if __name__ == "__main__":
     ap.add_argument("--pred", default=os.path.join(RESULTS_DIR, "predictions.csv"))
     ap.add_argument("--buffer", type=int, default=0)
     ap.add_argument("--neutral", action="store_true")
+    ap.add_argument("--skip", type=int, default=0)
     ap.add_argument("--tag", default="")
     ap.add_argument("--self-check", action="store_true")
     args = ap.parse_args()
     if args.self_check:
         self_check()
     else:
-        run_backtest(args.pred, buffer=args.buffer, neutral=args.neutral, tag=args.tag)
+        run_backtest(args.pred, buffer=args.buffer, neutral=args.neutral,
+                     skip=args.skip, tag=args.tag)
