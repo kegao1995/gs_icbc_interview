@@ -5,8 +5,8 @@ PYTHON ?= python
 .PHONY: all install eda train train-all backtest self-check buffer neutral \
         plots ablation package clean clean-all
 
-# 完整流水线:训练主模型 -> 回测 -> 图表
-all: train backtest plots
+# 完整流水线:训练主模型 -> 最终版回测(buffer+行业中性+40日信号平滑) -> 图表
+all: train final plots
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt

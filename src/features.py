@@ -14,6 +14,7 @@
   截面标准化后统一填 0(即视为截面均值)。
 """
 import os
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -28,16 +29,23 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "results", "cache")
 # ---------------------------------------------------------------- 截面预处理
 
 def cs_standardize_matrix(m: np.ndarray, n_mad: float = 5.0) -> np.ndarray:
-    """逐行(逐日)MAD 去极值 + z-score,NaN 保留。m: [n_days, n_stocks]"""
+    """逐行(逐日)MAD 去极值 + z-score,NaN 保留。m: [n_days, n_stocks]
+
+    面板前 2-3 个月长窗口滚动特征尚无足够历史,整行全 NaN,nanmedian/nanmean
+    会抛 RuntimeWarning;该预热期不进训练样本(训练自 2019-04 起),结果为 NaN
+    后续统一填 0,警告无实际影响,予以静音。
+    """
     m = m.astype(np.float64, copy=True)
-    med = np.nanmedian(m, axis=1, keepdims=True)
-    mad = np.nanmedian(np.abs(m - med), axis=1, keepdims=True)
-    scale = 1.4826 * mad
-    scale[scale == 0] = np.inf  # 截面无离散度时不做截断
-    m = np.clip(m, med - n_mad * scale, med + n_mad * scale)
-    mu = np.nanmean(m, axis=1, keepdims=True)
-    sd = np.nanstd(m, axis=1, keepdims=True)
-    sd[sd == 0] = 1.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        med = np.nanmedian(m, axis=1, keepdims=True)
+        mad = np.nanmedian(np.abs(m - med), axis=1, keepdims=True)
+        scale = 1.4826 * mad
+        scale[scale == 0] = np.inf  # 截面无离散度时不做截断
+        m = np.clip(m, med - n_mad * scale, med + n_mad * scale)
+        mu = np.nanmean(m, axis=1, keepdims=True)
+        sd = np.nanstd(m, axis=1, keepdims=True)
+        sd[sd == 0] = 1.0
     return (m - mu) / sd
 
 

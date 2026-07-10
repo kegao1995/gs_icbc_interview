@@ -4,37 +4,74 @@
 
 研究报告(含标签定义、特征工程、模型设计、回测结果与实盘风险说明)见 [report.md](report.md)。
 
-## 目录结构
+## 目录结构与文件说明
 
 ```
 ├── README.md                # 本文件
 ├── requirements.txt         # 依赖包及版本
-├── report.md                # 研究报告
-├── Quote.parquet            # 原始数据(随仓库提交,clone 后可直接运行)
+├── report.md                # 研究报告(含实盘风险说明)
+├── Makefile                 # 常用命令入口(make all / train / final / plots / package)
+├── Quote.parquet            # 原始数据:1000 只股票 2019-2023 日度行情(随仓库提交)
 ├── src/
-│   ├── data_loader.py       # 数据加载、复权因子、可交易标志
-│   ├── features.py          # 特征工程与标签构造(39 个特征,含复权因子反推的分红/送转因子)
-│   ├── model.py             # GRU / LSTM / MLP 模型定义
-│   ├── train.py             # 滚动训练 + 早停(同时保存验证期预测)
-│   ├── backtest.py          # 周度调仓回测与评价(buffer / neutral / skip / self-check)
-│   ├── plots.py             # IC 时序图、分组收益图
-│   └── utils.py             # 截面预处理、IC、回撤等工具函数
+│   ├── data_loader.py       # 数据加载、复权因子计算、可交易标志、周最后交易日
+│   ├── features.py          # 39 个特征与标签构造、逐日截面标准化、特征缓存
+│   ├── model.py             # GRU(主模型)/ LSTM / MLP 模型定义
+│   ├── train.py             # 滚动训练(--roll-months 参数化)+ 验证集 RankIC 早停
+│   ├── backtest.py          # 周度调仓回测引擎(--buffer / --neutral / --smooth /
+│   │                        #   --skip / --rebal-weeks / --self-check)
+│   ├── plots.py             # IC 时序图与分组收益图
+│   └── utils.py             # 截面预处理、IC 统计、最大回撤等工具函数
 ├── notebooks/
-│   ├── eda.py               # 探索性数据分析(数据体检)
-│   ├── feature_ablation.py  # 特征组消融(Ridge 代理)
-│   └── tune_skip.py         # 组合规则验证集调参(报告中的负结果实验)
-└── results/
-    ├── predictions.csv      # 测试集(2023)每日全股票预测值(GRU)
-    ├── backtest_results.csv # 回测指标(另有 _buffer/_neutral/_buffer_neutral/_skip100 变体)
-    ├── equity_curve.png     # 净值曲线(组合/基准/超额)
-    └── ...                  # 模型对比、IC 序列、消融、调参表等
+│   ├── eda.py               # 数据质量体检(停牌语义 / 复权 / 涨跌停 / VWAP)
+│   ├── feature_ablation.py  # 特征组消融(Ridge 线性代理,报告 8.2 节)
+│   ├── tune_smooth.py       # 信号平滑窗口验证集调参(最终版 smooth=40 的来源,报告 8.4 节)
+│   └── tune_skip.py         # 分位剔除验证集调参(报告 8.3 节负结果实验)
+└── results/                 # 训练与回测产物(见下表)
 ```
+
+**results/ 文件说明**(`<tag>` 为策略配置变体,对照表见后):
+
+| 文件 | 内容 |
+|---|---|
+| predictions.csv | 测试集(2023)每日全股票预测值,回测默认输入(内容同 predictions_gru.csv) |
+| predictions_{gru,lstm,mlp}.csv | 三个模型各自的测试集预测值 |
+| daily_rank_ic_{gru,lstm,mlp}.csv | 各模型测试集日度 RankIC 序列 |
+| model_ic_comparison.csv | 模型 IC 对比汇总(报告 8.1 节表格) |
+| feature_ablation.csv | 特征组消融结果(报告 8.2 节表格) |
+| tune_smooth_val.csv | 平滑窗口验证集调参表(报告 8.4 节) |
+| tune_skip_val.csv | 分位剔除验证集调参表(报告 8.3 节) |
+| backtest_results`<_tag>`.csv | 各配置回测指标(年化超额 / IR / 回撤 / 换手 / 胜率) |
+| nav_daily`<_tag>`.csv | 各配置组合与基准的日度收益序列 |
+| equity_curve`<_tag>`.png | 各配置净值曲线图(组合 / 基准 / 超额) |
+| ic_timeseries.png | 三模型日度 RankIC 移动平均与累计图(报告 8.1 节) |
+| group_returns_gru.png | GRU 预测值分组收益图(报告 8.3 节) |
+| cache/ | 特征面板缓存,不入库,可由 features.py 重新生成 |
+
+**回测配置 tag 对照**:
+
+| tag | 配置 | 报告章节 |
+|---|---|---|
+| (无后缀) | 基础版:周度调仓 Top200 等权 | 7 |
+| buffer | + 换手缓冲(排名 350 内不卖出) | 7 |
+| neutral | + 行业中性化 | 7 |
+| buffer_neutral | 缓冲 + 中性 | 7 |
+| **smooth40** | **缓冲 + 中性 + 40 日信号平滑(最终版)** | 7 / 8.4 |
+| biweekly / monthly | 双周 / 月度调仓(频率实验) | 8.4 |
+| skip100 | 剔除预测最高前 100 名(负结果留档) | 8.3 |
+| roll3 | 季度滚动训练(敏感性分析) | 6 |
 
 ## 运行方式
 
+**一键复现最终结果**(训练 GRU → 最终版回测 → 图表;GPU 约 15 分钟,CPU 约 2 小时):
+
 ```bash
 pip install -r requirements.txt
+make all      # 产出 results/backtest_results_smooth40.csv(年化超额 +3.9%, IR 1.08)与净值曲线
+```
 
+分步运行:
+
+```bash
 # 1. 数据体检(可选)
 python notebooks/eda.py
 
