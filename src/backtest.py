@@ -49,8 +49,23 @@ def prepare_market(df: pd.DataFrame):
     ret_cc = adj_close / adj_close.shift(1) - 1          # 昨收 -> 今收(停牌日=0)
     ret_cv = adj_vwap / adj_close.shift(1) - 1           # 昨收 -> 今日VWAP
     ret_vc = adj_close / adj_vwap - 1                    # 今日VWAP -> 今收
+
+    # 一字板识别(--limit-lock 用):涨跌停以未复权价对 PrevClose 判定;
+    # 涨跌停幅度按板块区分,20cm 板以"历史上触过 ~20% 板"的扩张标志识别
+    # (平衡面板无科创板,创业板 2020-08 改制由扩张窗口自然处理,无未来信息)
+    prev_raw = df.pivot(index="TradingDay", columns="StockID", values="PrevClosePrice")
+    high_raw = df.pivot(index="TradingDay", columns="StockID", values="HighPrice")
+    low_raw = df.pivot(index="TradingDay", columns="StockID", values="LowPrice")
+    hr = (high_raw / prev_raw - 1).where(tradable)
+    lr = (low_raw / prev_raw - 1).where(tradable)
+    hit20 = ((hr >= 0.198) | (lr <= -0.198)).fillna(False).astype(float).expanding().max()
+    lim = pd.DataFrame(0.10, index=hr.index, columns=hr.columns).where(hit20 < 1, 0.20)
+    yizi_up = (lr >= lim * 0.995).fillna(False)    # 一字涨停:全天最低价仍在板上,买不进
+    yizi_dn = (hr <= -lim * 0.995).fillna(False)   # 一字跌停:全天最高价仍在板上,卖不出
+
     return {"ret_cc": ret_cc.fillna(0.0), "ret_cv": ret_cv, "ret_vc": ret_vc,
-            "tradable": tradable, "days": adj_close.index, "stocks": adj_close.columns}
+            "tradable": tradable, "yizi_up": yizi_up, "yizi_dn": yizi_dn,
+            "days": adj_close.index, "stocks": adj_close.columns}
 
 
 def neutralize_by_industry(pred_df: pd.DataFrame, quote: pd.DataFrame) -> pd.DataFrame:
@@ -90,7 +105,7 @@ def select_target(pred: pd.Series, holdings: dict, tradable_t: pd.Series,
 
 def simulate(pred_df: pd.DataFrame, mkt: dict, n_top: int = N_TOP,
              cost_per_side: float = COST_PER_SIDE, buffer: int = 0, skip: int = 0,
-             rebal_weeks: int = 1, smooth: int = 1):
+             rebal_weeks: int = 1, smooth: int = 1, limit_lock: bool = False):
     """周度调仓组合模拟。
 
     pred_df: [TradingDay, StockID, pred];返回 (日度收益 Series, 每次调仓单边换手 Series)
@@ -124,8 +139,25 @@ def simulate(pred_df: pd.DataFrame, mkt: dict, n_top: int = N_TOP,
             tradable_t = mkt["tradable"].loc[d]
             r_cv, r_vc, r_cc = mkt["ret_cv"].loc[d], mkt["ret_vc"].loc[d], mkt["ret_cc"].loc[d]
 
-            frozen = [s for s in w.index if not tradable_t.get(s, False)]
-            filled = [s for s in pending if tradable_t.get(s, False)]
+            # limit_lock 下的非对称约束(冻结持仓按全日收益 r_cc 核算,与停牌同路径):
+            #   一字跌停的持仓卖不出 -> 冻结;
+            #   一字涨停:场外买不进(从买入候选剔除);已持有且目标继续持有的,
+            #   无法加仓也不应卖出 -> 冻结保持现有权重。
+            if limit_lock:
+                no_buy = mkt["yizi_up"].loc[d]
+                no_sell = mkt["yizi_dn"].loc[d]
+                pend_set = set(pending)
+                frozen = [s for s in w.index
+                          if not tradable_t.get(s, False)
+                          or no_sell.get(s, False)
+                          or (no_buy.get(s, False) and s in pend_set)]
+                frozen_set = set(frozen)
+                filled = [s for s in pending
+                          if tradable_t.get(s, False) and s not in frozen_set
+                          and not no_buy.get(s, False)]
+            else:
+                frozen = [s for s in w.index if not tradable_t.get(s, False)]
+                filled = [s for s in pending if tradable_t.get(s, False)]
 
             # 旧持仓:可交易部分随 昨收->VWAP,冻结部分随 昨收->当收(停牌日为 0)
             r_old = float((w.drop(frozen) * r_cv.reindex(w.drop(frozen).index)).sum()
@@ -236,7 +268,7 @@ def plot_equity(port_ret, bench_ret, out_png):
 
 def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
                  skip: int = 0, rebal_weeks: int = 1, smooth: int = 1,
-                 tag: str = "", save: bool = True):
+                 limit_lock: bool = False, tag: str = "", save: bool = True):
     quote = load_quote()
     mkt = prepare_market(quote)
 
@@ -245,7 +277,8 @@ def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
         pred_df = neutralize_by_industry(pred_df, quote)
 
     port_ret, turnovers = simulate(pred_df, mkt, buffer=buffer, skip=skip,
-                                   rebal_weeks=rebal_weeks, smooth=smooth)
+                                   rebal_weeks=rebal_weeks, smooth=smooth,
+                                   limit_lock=limit_lock)
 
     # 基准:同引擎、全持仓、零成本
     bench_pred = pred_df.copy()
@@ -294,6 +327,8 @@ if __name__ == "__main__":
                     help="调仓间隔(周),1=周度(默认),2=双周,4=月度")
     ap.add_argument("--smooth", type=int, default=1,
                     help="信号平滑窗口(交易日),1=不平滑(默认)")
+    ap.add_argument("--limit-lock", action="store_true",
+                    help="执行日一字涨停不可买入、一字跌停持仓冻结(默认关)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--self-check", action="store_true")
     args = ap.parse_args()
@@ -302,4 +337,4 @@ if __name__ == "__main__":
     else:
         run_backtest(args.pred, buffer=args.buffer, neutral=args.neutral,
                      skip=args.skip, rebal_weeks=args.rebal_weeks,
-                     smooth=args.smooth, tag=args.tag)
+                     smooth=args.smooth, limit_lock=args.limit_lock, tag=args.tag)

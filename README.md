@@ -18,7 +18,7 @@
 │   ├── model.py             # GRU(主模型)/ LSTM / MLP 模型定义
 │   ├── train.py             # 滚动训练(--roll-months 参数化)+ 验证集 RankIC 早停
 │   ├── backtest.py          # 周度调仓回测引擎(--buffer / --neutral / --smooth /
-│   │                        #   --skip / --rebal-weeks / --self-check)
+│   │                        #   --skip / --rebal-weeks / --limit-lock / --self-check)
 │   ├── plots.py             # IC 时序图与分组收益图
 │   └── utils.py             # 截面预处理、IC 统计、最大回撤等工具函数
 ├── notebooks/
