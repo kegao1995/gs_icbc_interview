@@ -26,15 +26,24 @@ eda:
 
 # ---------------------------------------------------------------- 训练
 
-# 训练主模型(GRU,两折半年滚动),并将其预测设为回测默认输入
-# 滚动步长可调:make train PYTHON="python" 后手动执行 src/train.py --roll-months 3
+# 训练主模型(GRU,两折半年滚动),并将其预测设为回测默认输入。
+# 注意:torch 2.13 + CUDA 在 Windows 上训练完成后、进程收尾瞬间可能
+# 崩溃(0xC0000409),此时全部产物已正确落盘。故此处不以退出码判定成败,
+# 而是训练前删除产物、训练后验证产物已重新生成(test -s),更为可靠。
 train:
-	$(PYTHON) src/train.py --model gru
+	rm -f results/predictions_gru.csv results/predictions.csv
+	-$(PYTHON) src/train.py --model gru
+	test -s results/predictions_gru.csv
 	cp results/predictions_gru.csv results/predictions.csv
 
-# 训练全部模型(GRU/LSTM/MLP,报告 8.1 节模型对比)
+# 训练全部模型(GRU/LSTM/MLP,报告 8.1 节模型对比);成败判定同上
 train-all:
-	$(PYTHON) src/train.py --model all
+	rm -f results/predictions_gru.csv results/predictions_lstm.csv \
+		results/predictions_mlp.csv results/predictions.csv
+	-$(PYTHON) src/train.py --model all
+	test -s results/predictions_gru.csv
+	test -s results/predictions_lstm.csv
+	test -s results/predictions_mlp.csv
 	cp results/predictions_gru.csv results/predictions.csv
 
 # ---------------------------------------------------------------- 回测

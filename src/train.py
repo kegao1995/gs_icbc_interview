@@ -18,6 +18,7 @@
 import argparse
 import copy
 import os
+import sys
 import time
 
 import numpy as np
@@ -255,3 +256,4 @@ if __name__ == "__main__":
     df = pd.DataFrame(summary).T
     df.to_csv(os.path.join(RESULTS_DIR, "model_ic_comparison.csv"))
     print("\n", df.round(4))
+    sys.stdout.flush()
