@@ -15,7 +15,14 @@ PYTHON ?= python
 # ---------------------------------------------------------------- 主流水线
 
 # 完整流水线:训练主模型 -> 最终版回测(缓冲+行业中性+40日信号平滑) -> 图表
-all: train final plots
+all:
+	@echo "========== [1/3] 训练 GRU 主模型 =========="
+	$(MAKE) train
+	@echo "========== [2/3] 最终版回测 =========="
+	$(MAKE) final
+	@echo "========== [3/3] 生成图表 =========="
+	$(MAKE) plots
+	@echo "========== 全部完成:最终指标见 results/backtest_results_smooth40.csv,净值曲线见 results/equity_curve_smooth40.png =========="
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -31,9 +38,14 @@ eda:
 # 崩溃(0xC0000409),此时全部产物已正确落盘。故此处不以退出码判定成败,
 # 而是训练前删除产物、训练后验证产物已重新生成(test -s),更为可靠。
 train:
+	@echo ">>> 清理旧预测产物(成败以产物是否重新生成判定,防止陈旧文件干扰)"
 	rm -f results/predictions_gru.csv results/predictions.csv
+	@echo ">>> GRU 两折滚动训练:首次运行先构建特征缓存约 3 分钟;训练 GPU 约 5 分钟、CPU 约 2 小时"
+	@echo ">>> (Windows+CUDA 下训练结束瞬间可能报 0xC0000409,系 cuDNN 收尾竞态,产物已落盘,可忽略)"
 	-$(PYTHON) src/train.py --model gru
+	@echo ">>> 校验预测文件已由本次训练生成"
 	test -s results/predictions_gru.csv
+	@echo ">>> 将 GRU 预测设为回测默认输入 results/predictions.csv"
 	cp results/predictions_gru.csv results/predictions.csv
 
 # 训练全部模型(GRU/LSTM/MLP,报告 8.1 节模型对比);成败判定同上
@@ -65,6 +77,7 @@ neutral:
 
 # 最终版:缓冲 + 行业中性 + 40 日信号平滑(报告第 7 节主结果,超额 +3.89%)
 final:
+	@echo ">>> 最终版回测:周度调仓 Top200 等权 + 换手缓冲350 + 行业中性 + 40日信号平滑,双边千三成本(约 4 分钟)"
 	$(PYTHON) src/backtest.py --buffer 350 --neutral --smooth 40 --tag smooth40
 
 # 报告涉及的全部回测变体(第 7 节表格 + 8.3/8.4 节实验)
@@ -90,6 +103,7 @@ ablation:
 
 # IC 时序图 / 分组收益图 / 特征重要性图(需先 train 与 ablation)
 plots:
+	@echo ">>> 生成图表:IC 时序、预测分组收益、特征重要性(约 1 分钟)"
 	$(PYTHON) src/plots.py
 
 # ---------------------------------------------------------------- 打包与清理
