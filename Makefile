@@ -123,6 +123,7 @@ TAR ?= $(shell [ -x /c/Windows/System32/tar.exe ] && echo /c/Windows/System32/ta
 
 package:
 	$(TAR) -a --exclude "results/cache" --exclude "__pycache__" \
+		--exclude "results/predictions_val_*" \
 		-cf submission.zip README.md requirements.txt report.md Makefile \
 		Quote.parquet src notebooks results
 
