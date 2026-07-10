@@ -12,6 +12,10 @@
   - 信号日 T 停牌的股票不进入买入候选;
   - 执行日 T+1 停牌:持仓卖不出 -> 继续持有;买入目标买不进 -> 放弃,资金摊给其余买入标的。
 
+一字板成交约束(默认开启,--no-limit-lock 关闭;基准与 self-check 为指数口径不受约束):
+  - 执行日一字涨停(全天最低价仍在板上)的买入目标买不进,资金摊给其余标的;
+  - 一字跌停的持仓卖不出 -> 冻结继续持有;已持有且目标续持的一字涨停股同样冻结保持权重。
+
 日度净值核算:
   - 调仓日收益分解为 [昨收->VWAP](旧权重) 与 [VWAP->当收](新权重)两段,成本按换手计提;
   - 非调仓日按复权收盘价收益漂移权重。
@@ -105,7 +109,7 @@ def select_target(pred: pd.Series, holdings: dict, tradable_t: pd.Series,
 
 def simulate(pred_df: pd.DataFrame, mkt: dict, n_top: int = N_TOP,
              cost_per_side: float = COST_PER_SIDE, buffer: int = 0, skip: int = 0,
-             rebal_weeks: int = 1, smooth: int = 1, limit_lock: bool = False):
+             rebal_weeks: int = 1, smooth: int = 1, limit_lock: bool = True):
     """周度调仓组合模拟。
 
     pred_df: [TradingDay, StockID, pred];返回 (日度收益 Series, 每次调仓单边换手 Series)
@@ -268,7 +272,7 @@ def plot_equity(port_ret, bench_ret, out_png):
 
 def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
                  skip: int = 0, rebal_weeks: int = 1, smooth: int = 1,
-                 limit_lock: bool = False, tag: str = "", save: bool = True):
+                 limit_lock: bool = True, tag: str = "", save: bool = True):
     quote = load_quote()
     mkt = prepare_market(quote)
 
@@ -280,10 +284,11 @@ def run_backtest(pred_path: str, buffer: int = 0, neutral: bool = False,
                                    rebal_weeks=rebal_weeks, smooth=smooth,
                                    limit_lock=limit_lock)
 
-    # 基准:同引擎、全持仓、零成本
+    # 基准:同引擎、全持仓、零成本;基准为指数口径,不施加一字板成交约束
     bench_pred = pred_df.copy()
     bench_pred["pred"] = 0.0
-    bench_ret, _ = simulate(bench_pred, mkt, n_top=len(mkt["stocks"]), cost_per_side=0.0)
+    bench_ret, _ = simulate(bench_pred, mkt, n_top=len(mkt["stocks"]),
+                            cost_per_side=0.0, limit_lock=False)
     bench_ret = bench_ret.reindex(port_ret.index)
 
     metrics = evaluate(port_ret, bench_ret, turnovers)
@@ -311,8 +316,10 @@ def self_check():
     mkt = prepare_market(quote)
     pred_path = os.path.join(RESULTS_DIR, "predictions.csv")
     pred_df = pd.read_csv(pred_path, parse_dates=["TradingDay"])
-    r1, _ = simulate(pred_df.assign(pred=0.0), mkt, n_top=len(mkt["stocks"]), cost_per_side=0.0)
-    r2, _ = simulate(pred_df.assign(pred=1.0), mkt, n_top=len(mkt["stocks"]), cost_per_side=0.0)
+    r1, _ = simulate(pred_df.assign(pred=0.0), mkt, n_top=len(mkt["stocks"]),
+                     cost_per_side=0.0, limit_lock=False)
+    r2, _ = simulate(pred_df.assign(pred=1.0), mkt, n_top=len(mkt["stocks"]),
+                     cost_per_side=0.0, limit_lock=False)
     diff = (r1 - r2).abs().max()
     print("self-check max |diff| =", diff, "(应为 0)")
 
@@ -327,8 +334,8 @@ if __name__ == "__main__":
                     help="调仓间隔(周),1=周度(默认),2=双周,4=月度")
     ap.add_argument("--smooth", type=int, default=1,
                     help="信号平滑窗口(交易日),1=不平滑(默认)")
-    ap.add_argument("--limit-lock", action="store_true",
-                    help="执行日一字涨停不可买入、一字跌停持仓冻结(默认关)")
+    ap.add_argument("--no-limit-lock", dest="limit_lock", action="store_false",
+                    help="关闭一字板成交约束(默认开启:一字涨停不可买入、一字跌停持仓冻结)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--self-check", action="store_true")
     args = ap.parse_args()
