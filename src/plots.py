@@ -73,7 +73,33 @@ def plot_group_returns(model="gru", n_groups=10):
     plt.close(fig)
 
 
+def plot_feature_importance():
+    """特征组重要性:消融实验中各组单独的 RankIC(需先跑 feature_ablation.py)"""
+    f = os.path.join(RESULTS_DIR, "feature_ablation.csv")
+    if not os.path.exists(f):
+        print("skip feature_importance: run notebooks/feature_ablation.py first")
+        return
+    df = pd.read_csv(f, index_col=0, encoding="utf-8-sig")
+    solo = df[df.index.str.startswith("仅 ")].copy()
+    solo.index = solo.index.str.replace("仅 ", "", regex=False)
+    solo = solo.sort_values("RankIC")
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    colors = ["#c44" if v < 0 else "#2a7" for v in solo["RankIC"]]
+    ax.barh(solo.index, solo["RankIC"], color=colors)
+    ax.axvline(df.loc["全部特征", "RankIC"], color="gray", ls="--", lw=1,
+               label=f"全部特征({df.loc['全部特征', 'RankIC']:.3f})")
+    ax.set_xlabel("单独 RankIC(Ridge,2023 测试集)")
+    ax.set_title("特征组重要性(分组消融)")
+    ax.legend()
+    ax.grid(alpha=0.3, axis="x")
+    fig.tight_layout()
+    fig.savefig(os.path.join(RESULTS_DIR, "feature_importance.png"), dpi=150)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     plot_ic_timeseries()
     plot_group_returns("gru")
+    plot_feature_importance()
     print("saved plots to", RESULTS_DIR)
