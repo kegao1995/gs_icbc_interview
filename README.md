@@ -20,6 +20,7 @@
 │   ├── backtest.py          # 周度调仓回测引擎(--buffer / --neutral / --smooth /
 │   │                        #   --skip / --rebal-weeks / --no-limit-lock / --self-check)
 │   ├── plots.py             # IC 时序图与分组收益图
+│   ├── say.py               # Makefile 步骤说明打印(中文消息集中于此,规避终端编码问题)
 │   └── utils.py             # 截面预处理、IC 统计、最大回撤等工具函数
 ├── notebooks/
 │   ├── eda.py               # 数据质量体检(停牌语义 / 复权 / 涨跌停 / VWAP)
